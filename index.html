@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -142,8 +143,15 @@
         }
 
         @keyframes pulse {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.02); }
+
+            0%,
+            100% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.02);
+            }
         }
 
         .alert-content {
@@ -159,9 +167,19 @@
         }
 
         @keyframes shake {
-            0%, 100% { transform: rotate(0deg); }
-            25% { transform: rotate(-10deg); }
-            75% { transform: rotate(10deg); }
+
+            0%,
+            100% {
+                transform: rotate(0deg);
+            }
+
+            25% {
+                transform: rotate(-10deg);
+            }
+
+            75% {
+                transform: rotate(10deg);
+            }
         }
 
         .alert-text h3 {
@@ -300,8 +318,88 @@
                 max-width: none;
             }
         }
+
+        /* Camera Card Styles */
+        .camera-card {
+            grid-column: span 2;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .video-container {
+            position: relative;
+            width: 100%;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #000;
+            aspect-ratio: 16/9;
+        }
+
+        #cameraPreview {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .scan-btn {
+            background: #2196F3;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .scan-btn:hover {
+            background: #1976D2;
+        }
+
+        .scan-btn.highlight {
+            animation: pulse-blue 1s infinite;
+            background: #00bcd4;
+            box-shadow: 0 0 20px rgba(0, 188, 212, 0.5);
+        }
+
+        @keyframes pulse-blue {
+            0% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(0, 188, 212, 0.7);
+            }
+
+            70% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 10px rgba(0, 188, 212, 0);
+            }
+
+            100% {
+                transform: scale(1);
+                box-shadow: 0 0 0 0 rgba(0, 188, 212, 0);
+            }
+        }
+
+        .ai-response {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 10px;
+            font-style: italic;
+            border-left: 4px solid #2196F3;
+            min-height: 50px;
+        }
+
+        #apiConfig {
+            margin-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            padding-top: 20px;
+        }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -334,6 +432,14 @@
                 <button onclick="startMonitoring()">Start Monitoring</button>
             </div>
             <div id="status" class="status" style="display: none;"></div>
+
+            <div id="apiConfig" class="input-group">
+                <label>Gemini API Key (for Environmental Scan):</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="password" id="geminiApiKey" placeholder="Enter Gemini API Key" style="flex: 1;">
+                    <button onclick="saveApiKey()">Save Key</button>
+                </div>
+            </div>
         </div>
 
         <div class="cards-grid">
@@ -370,6 +476,24 @@
                 <div class="card-value" id="servo">
                     <span class="button-state" id="servoIndicator"></span>
                     <span id="servoText">--</span>
+                </div>
+            </div>
+
+            <div class="card camera-card">
+                <div class="card-label">📷 Environmental Scan (AI)</div>
+                <div class="video-container">
+                    <video id="cameraPreview" autoplay playsinline title="Camera Preview"></video>
+                </div>
+                <div class="camera-controls">
+                    <button id="startCameraBtn" onclick="initCamera()">🔓 Enable Camera</button>
+                    <button id="flipCameraBtn" onclick="flipCamera()" style="display: none; background: #9C27B0;">🔄
+                        Flip Camera</button>
+                    <button id="scanBtn" class="scan-btn" onclick="captureAndScan()" disabled>
+                        🔍 Scan Environment
+                    </button>
+                </div>
+                <div id="aiResponse" class="ai-response">
+                    Waiting for scan...
                 </div>
             </div>
 
@@ -445,6 +569,162 @@
         let currentLat = null;
         let currentLon = null;
         let lastButtonState = null;
+        let geminiApiKey = localStorage.getItem('geminiApiKey') || '';
+        let currentFacingMode = 'environment';
+        let currentStream = null;
+
+        if (geminiApiKey) {
+            document.getElementById('geminiApiKey').value = geminiApiKey;
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('geminiApiKey').value.trim();
+            if (key) {
+                localStorage.setItem('geminiApiKey', key);
+                geminiApiKey = key;
+                alert('API Key saved locally!');
+            }
+        }
+
+        // Camera functions
+        async function initCamera() {
+            try {
+                // Stop any existing stream
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode }
+                });
+
+                currentStream = stream;
+                const video = document.getElementById('cameraPreview');
+                video.srcObject = stream;
+
+                document.getElementById('scanBtn').disabled = false;
+                document.getElementById('startCameraBtn').style.display = 'none';
+                document.getElementById('flipCameraBtn').style.display = 'inline-block';
+
+                speak(`Camera enabled using ${currentFacingMode === 'environment' ? 'back' : 'front'} lens.`);
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Could not access camera. Please ensure you're using HTTPS and have granted permissions.");
+            }
+        }
+
+        async function flipCamera() {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            await initCamera();
+        }
+
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        async function captureAndScan() {
+            if (!geminiApiKey) {
+                alert("Please enter a Gemini API Key in the configuration section.");
+                return;
+            }
+
+            const video = document.getElementById('cameraPreview');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+
+            const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+
+            const aiResponseEl = document.getElementById('aiResponse');
+            aiResponseEl.textContent = "⌛ Analyzing environment...";
+            speak("Scanning environment. Please wait.");
+
+            try {
+                // List of possible model identifiers based on your specific account list
+                const modelsToTry = [
+                    'gemini-2.0-flash',
+                    'gemini-2.0-flash-001',
+                    'gemini-flash-latest',
+                    'gemini-2.5-flash',
+                    'gemini-1.5-flash',
+                    'gemini-1.5-flash-latest'
+                ];
+
+                let success = false;
+                let lastError = "";
+
+                for (const modelName of modelsToTry) {
+                    try {
+                        console.log(`Attempting scan with model: ${modelName}`);
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{
+                                    parts: [
+                                        { text: "Role: You are the 'Virtual Eyes' for LUMA, an advanced smart stick assistant. \n\nTask: Provide a highly descriptive situational awareness report of the path ahead. \n\nStructure your response: \n1. Direct Path: State if 'Clear' or 'Obstructed' (name the obstacle and its clock-face position).\n2. Surface: Identify the ground type and hazards like puddles or steps.\n3. Landmarks/Barriers: Note entrances with stairs but no ramps.\n\nKeep response under 50 words. Ensure the sentence is COMPLETE and helps the user walk safely. Do not stop mid-sentence." },
+                                        { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+                                    ]
+                                }],
+                                generationConfig: {
+                                    temperature: 0.1,
+                                    maxOutputTokens: 1024
+                                }
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (response.ok && data.candidates && data.candidates.length > 0) {
+                            // Join all text parts in case the model splits the response
+                            const description = data.candidates[0].content.parts
+                                .map(part => part.text)
+                                .join(' ')
+                                .replace(/\*\*/g, '') // Remove markdown bold if AI uses it
+                                .trim();
+
+                            if (description) {
+                                aiResponseEl.textContent = description;
+                                speak(description);
+                                success = true;
+                                console.log(`✅ Success with model: ${modelName}`);
+                                break;
+                            }
+                        }
+                        lastError = data.error ? data.error.message : "Model failed";
+                        console.warn(`Model ${modelName} failed: ${lastError}`);
+                    } catch (innerErr) {
+                        lastError = innerErr.message;
+                        console.warn(`Error with ${modelName}: ${lastError}`);
+                    }
+                }
+
+                if (!success) {
+                    throw new Error(lastError || "Could not find a supported Gemini model.");
+                }
+
+            } catch (err) {
+                console.error("AI Scan Error:", err);
+                let displayError = "❌ Error analyzing image.";
+
+                if (err.message.includes("API key")) {
+                    displayError = "❌ Invalid API Key. Please get a fresh key from Google AI Studio.";
+                    speak("Your API key seems to be invalid.");
+                } else if (err.message.includes("quota") || err.message.includes("429")) {
+                    displayError = "❌ Quota Exceeded. Please wait 60 seconds.";
+                    speak("The AI is busy, please wait a minute.");
+                } else {
+                    displayError = `❌ ${err.message}`;
+                }
+
+                aiResponseEl.textContent = displayError;
+            }
+        }
 
         // Chart configurations
         const chartConfig = {
@@ -464,7 +744,7 @@
                         grid: { color: 'rgba(255, 255, 255, 0.1)' }
                     },
                     x: {
-                        ticks: { 
+                        ticks: {
                             color: '#fff',
                             maxRotation: 45,
                             minRotation: 45
@@ -529,7 +809,7 @@
                         max: 1.5,
                         ticks: {
                             color: '#fff',
-                            callback: function(value) {
+                            callback: function (value) {
                                 return value === 0 ? 'Pressed' : value === 1 ? 'Not Pressed' : '';
                             }
                         }
@@ -561,7 +841,7 @@
                         max: 1.5,
                         ticks: {
                             color: '#fff',
-                            callback: function(value) {
+                            callback: function (value) {
                                 return value === 0 ? 'OFF' : value === 1 ? 'ON' : '';
                             }
                         }
@@ -594,7 +874,7 @@
                         max: 1.5,
                         ticks: {
                             color: '#fff',
-                            callback: function(value) {
+                            callback: function (value) {
                                 return value === 0 ? 'OFF' : value === 1 ? 'ON' : '';
                             }
                         }
@@ -630,7 +910,7 @@
                         beginAtZero: false,
                         ticks: {
                             color: '#fff',
-                            callback: function(value) {
+                            callback: function (value) {
                                 return value.toFixed(6);
                             }
                         }
@@ -666,7 +946,7 @@
                         beginAtZero: false,
                         ticks: {
                             color: '#fff',
-                            callback: function(value) {
+                            callback: function (value) {
                                 return value.toFixed(6);
                             }
                         }
@@ -724,7 +1004,7 @@
                 }
 
                 const response = await fetch(url);
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -735,10 +1015,10 @@
                     // Update display with latest feed
                     const latestFeed = data.feeds[data.feeds.length - 1];
                     updateDisplay(latestFeed);
-                    
+
                     // Update charts with all feeds
                     updateChartsWithMultipleFeeds(data.feeds);
-                    
+
                     showStatus('✓ Data updated successfully', false);
                 } else {
                     showStatus('No data available yet', true);
@@ -754,6 +1034,17 @@
             const distance = feed.field1 ? parseFloat(feed.field1).toFixed(1) : '--';
             document.getElementById('distance').textContent = distance;
 
+            // Highlight scan button if distance < 20cm
+            const scanBtn = document.getElementById('scanBtn');
+            if (distance !== '--' && parseFloat(distance) < 20) {
+                if (!scanBtn.classList.contains('highlight')) {
+                    scanBtn.classList.add('highlight');
+                    speak("Object detected nearby. Consider scanning the environment.");
+                }
+            } else {
+                scanBtn.classList.remove('highlight');
+            }
+
             // Rain (field2)
             const rain = feed.field2 ? parseInt(feed.field2) : '--';
             document.getElementById('rain').textContent = rain;
@@ -762,16 +1053,16 @@
             const button = feed.field3;
             const buttonIndicator = document.getElementById('buttonIndicator');
             const buttonText = document.getElementById('buttonText');
-            
+
             if (button !== null && button !== undefined) {
                 const state = parseInt(button);
-                
+
                 // Check if button was just pressed (changed from 1 to 0)
                 if (lastButtonState !== null && lastButtonState === 1 && state === 0) {
                     document.getElementById('emergencyAlert').style.display = 'block';
                 }
                 lastButtonState = state;
-                
+
                 if (state === 0) {
                     buttonText.textContent = 'Pressed';
                     buttonIndicator.className = 'button-state button-pressed';
@@ -788,7 +1079,7 @@
             const buzzer = feed.field6;
             const buzzerIndicator = document.getElementById('buzzerIndicator');
             const buzzerText = document.getElementById('buzzerText');
-            
+
             if (buzzer !== null && buzzer !== undefined) {
                 const state = parseInt(buzzer);
                 if (state === 1) {
@@ -807,7 +1098,7 @@
             const servo = feed.field7;
             const servoIndicator = document.getElementById('servoIndicator');
             const servoText = document.getElementById('servoText');
-            
+
             if (servo !== null && servo !== undefined) {
                 const state = parseInt(servo);
                 if (state === 1) {
@@ -888,4 +1179,5 @@
         }
     </script>
 </body>
+
 </html>

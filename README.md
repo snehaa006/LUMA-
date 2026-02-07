@@ -10,7 +10,9 @@ LUMA is an IoT-based smart blind stick designed to assist visually impaired indi
 - Buzzer alerts for critical situations  
 - GPS-based location tracking (latitude & longitude)  
 - Local serial monitoring for real-time debugging and instant feedback  
+- AI-Powered Environmental Scan: Identifies ramps, stairs, and obstacles using Gemini 1.5 Flash  
 - Cloud-based web dashboard for remote monitoring  
+- Text-to-Speech (TTS) accessibility feedback  
 
 ## Sensors & Components
 - Ultrasonic Sensor  
@@ -27,7 +29,8 @@ LUMA is an IoT-based smart blind stick designed to assist visually impaired indi
 - **Embedded C / C++**  
 - **ESP32 WiFi**  
 - **ThingSpeak Cloud Platform**  
-- **Web Dashboard (ThingSpeak Visualizations)**  
+- **Gemini 1.5 Flash API** for AI vision processing  
+- **Web Dashboard** with real-time camera integration and TTS  
 
 ## System Overview
 The ESP32 continuously reads sensor data and processes alerts locally to ensure instant response.  
