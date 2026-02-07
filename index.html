@@ -486,6 +486,8 @@
                 </div>
                 <div class="camera-controls">
                     <button id="startCameraBtn" onclick="initCamera()">🔓 Enable Camera</button>
+                    <button id="flipCameraBtn" onclick="flipCamera()" style="display: none; background: #9C27B0;">🔄
+                        Flip Camera</button>
                     <button id="scanBtn" class="scan-btn" onclick="captureAndScan()" disabled>
                         🔍 Scan Environment
                     </button>
@@ -568,6 +570,8 @@
         let currentLon = null;
         let lastButtonState = null;
         let geminiApiKey = localStorage.getItem('geminiApiKey') || '';
+        let currentFacingMode = 'environment';
+        let currentStream = null;
 
         if (geminiApiKey) {
             document.getElementById('geminiApiKey').value = geminiApiKey;
@@ -585,18 +589,33 @@
         // Camera functions
         async function initCamera() {
             try {
+                // Stop any existing stream
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' }
+                    video: { facingMode: currentFacingMode }
                 });
+
+                currentStream = stream;
                 const video = document.getElementById('cameraPreview');
                 video.srcObject = stream;
+
                 document.getElementById('scanBtn').disabled = false;
                 document.getElementById('startCameraBtn').style.display = 'none';
-                speak("Camera enabled. You can now scan the environment.");
+                document.getElementById('flipCameraBtn').style.display = 'inline-block';
+
+                speak(`Camera enabled using ${currentFacingMode === 'environment' ? 'back' : 'front'} lens.`);
             } catch (err) {
                 console.error("Error accessing camera:", err);
                 alert("Could not access camera. Please ensure you're using HTTPS and have granted permissions.");
             }
+        }
+
+        async function flipCamera() {
+            currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+            await initCamera();
         }
 
         function speak(text) {
@@ -626,35 +645,84 @@
             speak("Scanning environment. Please wait.");
 
             try {
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        contents: [{
-                            parts: [
-                                { text: "You are an assistant for a visually impaired person. Look at this photo and identify if there is a ramp, a staircase, a door, or a dangerous obstacle. Keep the description under 15 words. Mention specifically if you see a Health Center Ramp." },
-                                {
-                                    inlineData: {
-                                        mimeType: "image/jpeg",
-                                        data: base64Image
-                                    }
+                // List of possible model identifiers based on your specific account list
+                const modelsToTry = [
+                    'gemini-2.0-flash',
+                    'gemini-2.0-flash-001',
+                    'gemini-flash-latest',
+                    'gemini-2.5-flash',
+                    'gemini-1.5-flash',
+                    'gemini-1.5-flash-latest'
+                ];
+
+                let success = false;
+                let lastError = "";
+
+                for (const modelName of modelsToTry) {
+                    try {
+                        console.log(`Attempting scan with model: ${modelName}`);
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${geminiApiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{
+                                    parts: [
+                                        { text: "Role: You are the 'Virtual Eyes' for LUMA, an advanced smart stick assistant. \n\nTask: Provide a highly descriptive situational awareness report of the path ahead. \n\nStructure your response: \n1. Direct Path: State if 'Clear' or 'Obstructed' (name the obstacle and its clock-face position).\n2. Surface: Identify the ground type and hazards like puddles or steps.\n3. Landmarks/Barriers: Note entrances with stairs but no ramps.\n\nKeep response under 50 words. Ensure the sentence is COMPLETE and helps the user walk safely. Do not stop mid-sentence." },
+                                        { inlineData: { mimeType: "image/jpeg", data: base64Image } }
+                                    ]
+                                }],
+                                generationConfig: {
+                                    temperature: 0.1,
+                                    maxOutputTokens: 1024
                                 }
-                            ]
-                        }]
-                    })
-                });
+                            })
+                        });
 
-                const data = await response.json();
-                const description = data.candidates[0].content.parts[0].text;
+                        const data = await response.json();
 
-                aiResponseEl.textContent = description;
-                speak(description);
+                        if (response.ok && data.candidates && data.candidates.length > 0) {
+                            // Join all text parts in case the model splits the response
+                            const description = data.candidates[0].content.parts
+                                .map(part => part.text)
+                                .join(' ')
+                                .replace(/\*\*/g, '') // Remove markdown bold if AI uses it
+                                .trim();
+
+                            if (description) {
+                                aiResponseEl.textContent = description;
+                                speak(description);
+                                success = true;
+                                console.log(`✅ Success with model: ${modelName}`);
+                                break;
+                            }
+                        }
+                        lastError = data.error ? data.error.message : "Model failed";
+                        console.warn(`Model ${modelName} failed: ${lastError}`);
+                    } catch (innerErr) {
+                        lastError = innerErr.message;
+                        console.warn(`Error with ${modelName}: ${lastError}`);
+                    }
+                }
+
+                if (!success) {
+                    throw new Error(lastError || "Could not find a supported Gemini model.");
+                }
+
             } catch (err) {
                 console.error("AI Scan Error:", err);
-                aiResponseEl.textContent = "❌ Error analyzing image. Check API key and connection.";
-                speak("Sorry, I encountered an error while scanning.");
+                let displayError = "❌ Error analyzing image.";
+
+                if (err.message.includes("API key")) {
+                    displayError = "❌ Invalid API Key. Please get a fresh key from Google AI Studio.";
+                    speak("Your API key seems to be invalid.");
+                } else if (err.message.includes("quota") || err.message.includes("429")) {
+                    displayError = "❌ Quota Exceeded. Please wait 60 seconds.";
+                    speak("The AI is busy, please wait a minute.");
+                } else {
+                    displayError = `❌ ${err.message}`;
+                }
+
+                aiResponseEl.textContent = displayError;
             }
         }
 
